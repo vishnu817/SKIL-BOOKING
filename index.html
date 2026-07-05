@@ -214,6 +214,51 @@ var CONTENTS = ["Documents","Gift Items","Personal Effects / Used Items","Electr
 var PAYMENT  = ["Cash","Online / UPI","Bank Transfer","Credit (Account)"];
 var RED = "#CC0000", DARK = "#1a1a1a";
 
+// ═══════════════════ TRACKING SHEET SYNC (AfterShip-ready) ═══════════════
+// Paste your deployed Google Apps Script Web App URL below (the same one
+// used by SKL_Tracking.html / SKL_International_Services.html). Every time
+// a booking is saved here, this quietly posts it into your Shipments sheet
+// so it's searchable on the tracking page right away — nothing to type by
+// hand. If this fails for any reason (offline, URL not set yet), the
+// receipt still saves locally exactly as before — this is best-effort only.
+var TRACKING_APPS_SCRIPT_URL = "PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE";
+
+// Best-effort mapping from the courier names shown in this app to
+// AfterShip's internal courier codes ("slugs"), used for live tracking.
+// Verify / correct these against https://www.aftership.com/couriers —
+// anything NOT listed here (or left blank) is fine too: AfterShip will
+// just auto-detect the courier instead of relying on an exact slug.
+var COURIER_SLUGS = {
+  "FedEx": "fedex", "UPS": "ups", "DTDC": "dtdc", "Aramex": "aramex",
+  "DHL": "dhl", "DHL Express": "dhl-express", "DHL eCommerce": "dhl-ecommerce",
+  "Blue Dart": "blue-dart", "Delhivery": "delhivery", "USPS": "usps",
+  "TNT": "tnt", "Ecom Express": "ecom-express", "India Post": "india-post"
+};
+
+function pushToTrackingSheet(r) {
+  if (!TRACKING_APPS_SCRIPT_URL || TRACKING_APPS_SCRIPT_URL.indexOf("PASTE_YOUR") === 0) return;
+
+  var payload = {
+    referenceNumber: r.awb,
+    receiverName: r.receiverName || "",
+    origin: [r.originCity, r.originCountry].filter(Boolean).join(", "),
+    destination: [r.destCity, r.destState, r.destCountry].filter(Boolean).join(", "),
+    service: r.mode || "",
+    currentStatus: "Booked",
+    carrierName: (r.courier && r.courier !== "SELF") ? r.courier : "",
+    carrierTrackingNumber: (r.courier && r.courier !== "SELF") ? r.awb : "",
+    afterShipSlug: COURIER_SLUGS[r.courier] || ""
+  };
+
+  try {
+    fetch(TRACKING_APPS_SCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" }, // keeps this a "simple request" — no CORS preflight
+      body: JSON.stringify(payload)
+    }).catch(function () { /* non-fatal — receipt is already saved locally */ });
+  } catch (e) { /* non-fatal */ }
+}
+
 var COUNTRIES = ["United States","United Kingdom","United Arab Emirates","Saudi Arabia","Qatar",
   "Kuwait","Bahrain","Oman","Singapore","Malaysia","Australia","New Zealand","Canada","Germany",
   "France","Italy","Spain","Netherlands","Belgium","Switzerland","Sweden","Norway","Denmark",
@@ -710,6 +755,7 @@ function doSave() {
   var r = Object.assign({}, F, { dateTime: new Date().toISOString(), id: Date.now() });
   HIST.unshift(r); SAVED = r; AF = {};
   saveHist(); renderBooking(); updBadge();
+  pushToTrackingSheet(r);
   toast("✅ Receipt saved!");
   setTimeout(function(){ window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }); }, 100);
 }
