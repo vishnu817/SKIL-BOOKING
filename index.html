@@ -162,6 +162,7 @@ select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/
       <div id="rcap"></div>
       <div style="display:flex;flex-direction:column;gap:10px;">
         <button class="btn b-wa" id="wabtn" onclick="doShareWA()">📤 Share to WhatsApp</button>
+        <div id="wa-manual-link"></div>
         <button class="btn b-dark" id="anybtn" onclick="doShare()">📎 Share via Other App</button>
         <button class="btn b-dark" id="dlbtn" onclick="doDownload()">💾 Save Image to Phone</button>
       </div>
@@ -278,6 +279,7 @@ function blankForm() {
 var F = blankForm();
 var HIST = [];
 var SAVED = null;
+var EDITING_ID = null; // set when editing an existing history entry, null for a new booking
 var AF = {};   // autofilled fields
 var QRUNNING = false;
 var LASTSCAN = null;
@@ -603,6 +605,13 @@ function renderBooking() {
 function bookingHTML() {
   var h = "";
 
+  if (EDITING_ID) {
+    h += '<div class="card" style="background:#fff8e1;border:1.5px solid #f59e0b;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;">';
+    h += '<div style="font-size:13px;color:#92400e;font-weight:700;">✏️ Editing booking ' + esc(F.awb || '') + '</div>';
+    h += '<button class="btn b-gray" style="width:auto;padding:8px 14px;font-size:12px;" onclick="cancelEdit()">Cancel</button>';
+    h += '</div>';
+  }
+
   // ── Booking Details ──
   h += '<div class="card">';
   h += '<div class="ctitle">📋 Booking Details</div>';
@@ -723,7 +732,7 @@ function bookingHTML() {
 
   // Buttons
   h += '<div style="display:flex;flex-direction:column;gap:10px;margin-bottom:14px;">';
-  h += '<button class="btn b-red" onclick="doSave()">💾 Save &amp; Preview Receipt</button>';
+  h += '<button class="btn b-red" onclick="doSave()">' + (EDITING_ID ? '💾 Save Changes' : '💾 Save &amp; Preview Receipt') + '</button>';
   h += '<button class="btn b-gray" onclick="doClear()">🗑 Clear Form</button>';
   h += '</div>';
 
@@ -752,14 +761,26 @@ function doSave() {
   if (!F.destAddr.trim()) { toast("⚠️ Please enter destination address"); return; }
   if (!F.destCity.trim()) { toast("⚠️ Please enter destination city"); return; }
   if (!F.awb.trim()) { F.awb = "SKL-" + fmtRefDate(new Date()) + "-" + pad2(nextSeqForToday()); }
-  var r = Object.assign({}, F, { dateTime: new Date().toISOString(), id: Date.now() });
-  HIST.unshift(r); SAVED = r; AF = {};
-  saveHist(); renderBooking(); updBadge();
-  pushToTrackingSheet(r);
-  toast("✅ Receipt saved!");
+
+  if (EDITING_ID) {
+    // Update the existing entry in place instead of creating a duplicate
+    var idx = HIST.findIndex(function(h){ return h.id === EDITING_ID; });
+    var r = Object.assign({}, F, { dateTime: (idx > -1 ? HIST[idx].dateTime : new Date().toISOString()), id: EDITING_ID });
+    if (idx > -1) { HIST[idx] = r; } else { HIST.unshift(r); }
+    SAVED = r; AF = {}; EDITING_ID = null;
+    saveHist(); renderBooking(); updBadge();
+    pushToTrackingSheet(r);
+    toast("✅ Booking updated!");
+  } else {
+    var r = Object.assign({}, F, { dateTime: new Date().toISOString(), id: Date.now() });
+    HIST.unshift(r); SAVED = r; AF = {};
+    saveHist(); renderBooking(); updBadge();
+    pushToTrackingSheet(r);
+    toast("✅ Receipt saved!");
+  }
   setTimeout(function(){ window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }); }, 100);
 }
-function doClear() { freshForm(); SAVED = null; renderBooking(); }
+function doClear() { EDITING_ID = null; freshForm(); SAVED = null; renderBooking(); }
 function doPrint() {
   if (!SAVED) return;
 
@@ -821,6 +842,7 @@ function openShare() {
   rc.innerHTML = "";
   var c = makeReceiptCanvas(SAVED, false); c.style.maxWidth = "100%";
   rc.appendChild(c); SHARE_CANVAS = c;
+  var wl = document.getElementById("wa-manual-link"); if (wl) wl.innerHTML = "";
   var tp = document.getElementById("txt-phone"); if (tp) tp.value = SAVED.receiverPhone || "";
   var tm = document.getElementById("txt-msg"); if (tm) tm.value = buildReceiverText(SAVED);
   setShareTab("img");
@@ -865,8 +887,11 @@ function fallbackWA(c) {
   a.href = c.toDataURL("image/png");
   a.download = "SKL_Receipt_" + (SAVED.awb||"receipt") + ".png";
   a.click();
-  toast("✅ Image saved! Opening WhatsApp — attach the saved image from your gallery.", 4500);
-  setTimeout(function(){ window.open("https://wa.me/", "_blank"); }, 700);
+  toast("✅ Image saved! Tap 'Open WhatsApp' below, then attach it from your gallery.", 5000);
+  var link = document.getElementById("wa-manual-link");
+  if (link) {
+    link.innerHTML = '<a class="btn b-wa" href="https://wa.me/" target="_blank" rel="noopener" style="display:flex;text-decoration:none;margin-top:8px;">📱 Open WhatsApp →</a>';
+  }
   var btn = document.getElementById("wabtn"); if (btn) btn.textContent = "📤 Share to WhatsApp";
 }
 function doShare() {
@@ -1166,10 +1191,30 @@ function histRows(list) {
     '<div><span style="color:#888;">Via:</span> <b>' + esc(r.courier) + '</b></div>' +
     '<div><span style="color:#888;">Receiver:</span> ' + esc(r.receiverName||"—") + '</div>' +
     '<div><span style="color:#888;">Pay:</span> ' + esc(r.payment) + '</div></div>' +
-    '<button class="btn b-red" style="padding:11px;font-size:14px;" onclick="reprnt(' + JSON.stringify(r) + ')">📄 View &amp; Share</button></div>';
+    '<div style="display:flex;gap:8px;">' +
+    '<button class="btn b-gray" style="padding:11px;font-size:13px;flex:1;" onclick="editHistItem(' + r.id + ')">✏️ Edit</button>' +
+    '<button class="btn b-red" style="padding:11px;font-size:13px;flex:1;" onclick="reprnt(' + r.id + ')">📄 View &amp; Share</button>' +
+    '</div></div>';
   }).join("");
 }
-function reprnt(r) { SAVED = r; goPage("booking"); setTimeout(function(){ window.scrollTo({top:document.body.scrollHeight,behavior:"smooth"}); }, 300); }
+function findHistById(id) {
+  for (var i = 0; i < HIST.length; i++) { if (HIST[i].id === id) return HIST[i]; }
+  return null;
+}
+function reprnt(id) {
+  var r = findHistById(id); if (!r) { toast("Record not found"); return; }
+  EDITING_ID = null; SAVED = r; goPage("booking");
+  setTimeout(function(){ window.scrollTo({top:document.body.scrollHeight,behavior:"smooth"}); }, 300);
+}
+function editHistItem(id) {
+  var r = findHistById(id); if (!r) { toast("Record not found"); return; }
+  F = Object.assign({}, r);
+  EDITING_ID = id;
+  SAVED = null;
+  goPage("booking");
+  toast("✏️ Editing " + r.awb + " — change details, then Save", 3500);
+}
+function cancelEdit() { EDITING_ID = null; freshForm(); renderBooking(); }
 
 // ═══════════════════════ SUMMARY PAGE ════════════════════════════════════
 function todayStr() { return fmtD(new Date()).replace(/ /g,"_"); }
