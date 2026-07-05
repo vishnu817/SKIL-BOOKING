@@ -237,7 +237,10 @@ var COURIER_SLUGS = {
 };
 
 function pushToTrackingSheet(r) {
-  if (!TRACKING_APPS_SCRIPT_URL || TRACKING_APPS_SCRIPT_URL.indexOf("PASTE_YOUR") === 0) return;
+  if (!TRACKING_APPS_SCRIPT_URL || TRACKING_APPS_SCRIPT_URL.indexOf("PASTE_YOUR") === 0) {
+    console.warn("[SKL Tracking Sync] TRACKING_APPS_SCRIPT_URL not set — skipping sync.");
+    return;
+  }
 
   var payload = {
     referenceNumber: r.awb,
@@ -251,13 +254,29 @@ function pushToTrackingSheet(r) {
     afterShipSlug: COURIER_SLUGS[r.courier] || ""
   };
 
-  try {
-    fetch(TRACKING_APPS_SCRIPT_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" }, // keeps this a "simple request" — no CORS preflight
-      body: JSON.stringify(payload)
-    }).catch(function () { /* non-fatal — receipt is already saved locally */ });
-  } catch (e) { /* non-fatal */ }
+  console.log("[SKL Tracking Sync] Sending to sheet:", payload);
+
+  fetch(TRACKING_APPS_SCRIPT_URL, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" }, // keeps this a "simple request" — no CORS preflight
+    body: JSON.stringify(payload)
+  })
+    .then(function (res) {
+      console.log("[SKL Tracking Sync] HTTP status:", res.status);
+      return res.text();
+    })
+    .then(function (text) {
+      console.log("[SKL Tracking Sync] Response body:", text);
+      var data;
+      try { data = JSON.parse(text); } catch (e) { data = null; }
+      if (!data || !data.ok) {
+        toast("⚠️ Tracking sheet sync failed — booking saved locally. Check console for details.", 4000);
+      }
+    })
+    .catch(function (err) {
+      console.error("[SKL Tracking Sync] Request failed:", err);
+      toast("⚠️ Couldn't reach tracking sheet — booking saved locally.", 4000);
+    });
 }
 
 var COUNTRIES = ["United States","United Kingdom","United Arab Emirates","Saudi Arabia","Qatar",
