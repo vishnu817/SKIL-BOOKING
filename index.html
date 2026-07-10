@@ -162,7 +162,6 @@ select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/
       <div id="rcap"></div>
       <div style="display:flex;flex-direction:column;gap:10px;">
         <button class="btn b-wa" id="wabtn" onclick="doShareWA()">📤 Share to WhatsApp</button>
-        <div id="wa-manual-link"></div>
         <button class="btn b-dark" id="anybtn" onclick="doShare()">📎 Share via Other App</button>
         <button class="btn b-dark" id="dlbtn" onclick="doDownload()">💾 Save Image to Phone</button>
       </div>
@@ -215,70 +214,6 @@ var CONTENTS = ["Documents","Gift Items","Personal Effects / Used Items","Electr
 var PAYMENT  = ["Cash","Online / UPI","Bank Transfer","Credit (Account)"];
 var RED = "#CC0000", DARK = "#1a1a1a";
 
-// ═══════════════════ TRACKING SHEET SYNC (AfterShip-ready) ═══════════════
-// Paste your deployed Google Apps Script Web App URL below (the same one
-// used by SKL_Tracking.html / SKL_International_Services.html). Every time
-// a booking is saved here, this quietly posts it into your Shipments sheet
-// so it's searchable on the tracking page right away — nothing to type by
-// hand. If this fails for any reason (offline, URL not set yet), the
-// receipt still saves locally exactly as before — this is best-effort only.
-var TRACKING_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzfB7BPCWzAJBpRWtIktsqB2gGAJk_RRQVgugkubhhtvKI6W-Dgm-s7ntZiYZ7XqUxa/exec";
-
-// Best-effort mapping from the courier names shown in this app to
-// AfterShip's internal courier codes ("slugs"), used for live tracking.
-// Verify / correct these against https://www.aftership.com/couriers —
-// anything NOT listed here (or left blank) is fine too: AfterShip will
-// just auto-detect the courier instead of relying on an exact slug.
-var COURIER_SLUGS = {
-  "FedEx": "fedex", "UPS": "ups", "DTDC": "dtdc", "Aramex": "aramex",
-  "DHL": "dhl", "DHL Express": "dhl-express", "DHL eCommerce": "dhl-ecommerce",
-  "Blue Dart": "blue-dart", "Delhivery": "delhivery", "USPS": "usps",
-  "TNT": "tnt", "Ecom Express": "ecom-express", "India Post": "india-post"
-};
-
-function pushToTrackingSheet(r) {
-  if (!TRACKING_APPS_SCRIPT_URL || TRACKING_APPS_SCRIPT_URL.indexOf("PASTE_YOUR") === 0) {
-    console.warn("[SKL Tracking Sync] TRACKING_APPS_SCRIPT_URL not set — skipping sync.");
-    return;
-  }
-
-  var payload = {
-    referenceNumber: r.awb,
-    receiverName: r.receiverName || "",
-    origin: [r.originCity, r.originCountry].filter(Boolean).join(", "),
-    destination: [r.destCity, r.destState, r.destCountry].filter(Boolean).join(", "),
-    service: r.mode || "",
-    currentStatus: "Booked",
-    carrierName: (r.courier && r.courier !== "SELF") ? r.courier : "",
-    carrierTrackingNumber: (r.courier && r.courier !== "SELF") ? r.awb : "",
-    afterShipSlug: COURIER_SLUGS[r.courier] || ""
-  };
-
-  console.log("[SKL Tracking Sync] Sending to sheet:", payload);
-
-  fetch(TRACKING_APPS_SCRIPT_URL, {
-    method: "POST",
-    headers: { "Content-Type": "text/plain;charset=utf-8" }, // keeps this a "simple request" — no CORS preflight
-    body: JSON.stringify(payload)
-  })
-    .then(function (res) {
-      console.log("[SKL Tracking Sync] HTTP status:", res.status);
-      return res.text();
-    })
-    .then(function (text) {
-      console.log("[SKL Tracking Sync] Response body:", text);
-      var data;
-      try { data = JSON.parse(text); } catch (e) { data = null; }
-      if (!data || !data.ok) {
-        toast("⚠️ Tracking sheet sync failed — booking saved locally. Check console for details.", 4000);
-      }
-    })
-    .catch(function (err) {
-      console.error("[SKL Tracking Sync] Request failed:", err);
-      toast("⚠️ Couldn't reach tracking sheet — booking saved locally.", 4000);
-    });
-}
-
 var COUNTRIES = ["United States","United Kingdom","United Arab Emirates","Saudi Arabia","Qatar",
   "Kuwait","Bahrain","Oman","Singapore","Malaysia","Australia","New Zealand","Canada","Germany",
   "France","Italy","Spain","Netherlands","Belgium","Switzerland","Sweden","Norway","Denmark",
@@ -298,7 +233,6 @@ function blankForm() {
 var F = blankForm();
 var HIST = [];
 var SAVED = null;
-var EDITING_ID = null; // set when editing an existing history entry, null for a new booking
 var AF = {};   // autofilled fields
 var QRUNNING = false;
 var LASTSCAN = null;
@@ -624,13 +558,6 @@ function renderBooking() {
 function bookingHTML() {
   var h = "";
 
-  if (EDITING_ID) {
-    h += '<div class="card" style="background:#fff8e1;border:1.5px solid #f59e0b;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;">';
-    h += '<div style="font-size:13px;color:#92400e;font-weight:700;">✏️ Editing booking ' + esc(F.awb || '') + '</div>';
-    h += '<button class="btn b-gray" style="width:auto;padding:8px 14px;font-size:12px;" onclick="cancelEdit()">Cancel</button>';
-    h += '</div>';
-  }
-
   // ── Booking Details ──
   h += '<div class="card">';
   h += '<div class="ctitle">📋 Booking Details</div>';
@@ -751,7 +678,7 @@ function bookingHTML() {
 
   // Buttons
   h += '<div style="display:flex;flex-direction:column;gap:10px;margin-bottom:14px;">';
-  h += '<button class="btn b-red" onclick="doSave()">' + (EDITING_ID ? '💾 Save Changes' : '💾 Save &amp; Preview Receipt') + '</button>';
+  h += '<button class="btn b-red" onclick="doSave()">💾 Save &amp; Preview Receipt</button>';
   h += '<button class="btn b-gray" onclick="doClear()">🗑 Clear Form</button>';
   h += '</div>';
 
@@ -764,7 +691,8 @@ function bookingHTML() {
     h += '<div id="rcv-wrap" style="overflow-x:auto;text-align:center;"></div></div>';
     h += '<div style="display:flex;flex-direction:column;gap:10px;margin-bottom:14px;">';
     h += '<button class="btn b-wa" onclick="openShare()">📲 Share Receipt Image (WhatsApp / Any App)</button>';
-    h += '<button class="btn b-dark" onclick="doPrint()">🖨 Print Receipt</button>';
+    h += '<button class="btn b-dark" onclick="doPrintA5()">🖨 Print A5 Sheet (Landscape)</button>';
+    h += '<button class="btn b-gray" onclick="doPrint()">🧾 Print Thermal Receipt (80mm Roll)</button>';
     if (SAVED.senderPhone && SAVED.senderPhone.trim().length >= 10) {
       h += '<button class="btn" style="background:#075e54;color:#fff;" onclick="waSender()">💬 Send Booking Confirmation to Sender (' + SAVED.senderPhone + ')</button>';
     }
@@ -780,26 +708,13 @@ function doSave() {
   if (!F.destAddr.trim()) { toast("⚠️ Please enter destination address"); return; }
   if (!F.destCity.trim()) { toast("⚠️ Please enter destination city"); return; }
   if (!F.awb.trim()) { F.awb = "SKL-" + fmtRefDate(new Date()) + "-" + pad2(nextSeqForToday()); }
-
-  if (EDITING_ID) {
-    // Update the existing entry in place instead of creating a duplicate
-    var idx = HIST.findIndex(function(h){ return h.id === EDITING_ID; });
-    var r = Object.assign({}, F, { dateTime: (idx > -1 ? HIST[idx].dateTime : new Date().toISOString()), id: EDITING_ID });
-    if (idx > -1) { HIST[idx] = r; } else { HIST.unshift(r); }
-    SAVED = r; AF = {}; EDITING_ID = null;
-    saveHist(); renderBooking(); updBadge();
-    pushToTrackingSheet(r);
-    toast("✅ Booking updated!");
-  } else {
-    var r = Object.assign({}, F, { dateTime: new Date().toISOString(), id: Date.now() });
-    HIST.unshift(r); SAVED = r; AF = {};
-    saveHist(); renderBooking(); updBadge();
-    pushToTrackingSheet(r);
-    toast("✅ Receipt saved!");
-  }
+  var r = Object.assign({}, F, { dateTime: new Date().toISOString(), id: Date.now() });
+  HIST.unshift(r); SAVED = r; AF = {};
+  saveHist(); renderBooking(); updBadge();
+  toast("✅ Receipt saved!");
   setTimeout(function(){ window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }); }, 100);
 }
-function doClear() { EDITING_ID = null; freshForm(); SAVED = null; renderBooking(); }
+function doClear() { freshForm(); SAVED = null; renderBooking(); }
 function doPrint() {
   if (!SAVED) return;
 
@@ -824,6 +739,97 @@ function doPrint() {
   ].join("");
 
   var win = window.open("", "_blank", "width=320,height=700");
+  if (!win) { toast("Allow popups for printing"); return; }
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
+}
+
+// ═══════════════════════ A5 LANDSCAPE PRINT (professional sheet) ═════════
+function a5Row(label, value) {
+  return '<div class="a5-f"><div class="a5-l">' + label + '</div><div class="a5-v">' + (value||'\u2014') + '</div></div>';
+}
+function doPrintA5() {
+  if (!SAVED) return;
+  var r = SAVED;
+  var hasRem = r.remarks && r.remarks.trim();
+
+  var html = [
+'<!DOCTYPE html><html><head><meta charset="UTF-8"><title>SK Logistics - ' + esc(r.awb) + '</title>',
+'<style>',
+'*{margin:0;padding:0;box-sizing:border-box;}',
+'@page{size:210mm 148mm;margin:0;}',
+'body{width:210mm;height:148mm;font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;background:#fff;}',
+'.sheet{width:210mm;height:148mm;padding:8mm 10mm;position:relative;}',
+'.hdr{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2.5px solid #CC0000;padding-bottom:4mm;margin-bottom:4mm;}',
+'.hdr h1{font-size:22pt;letter-spacing:.5px;color:#1a1a1a;}',
+'.hdr .tag{font-size:9pt;color:#CC0000;font-weight:700;margin-top:1mm;}',
+'.hdr .addr{font-size:8.5pt;color:#555;margin-top:1.5mm;line-height:1.5;}',
+'.refbox{border:1.5px solid #1a1a1a;border-radius:2mm;padding:3mm 5mm;text-align:center;min-width:52mm;}',
+'.refbox .lbl{font-size:7.5pt;color:#888;letter-spacing:.5px;text-transform:uppercase;}',
+'.refbox .val{font-size:15pt;font-weight:800;color:#CC0000;margin:1mm 0;letter-spacing:.5px;}',
+'.refbox .dt{font-size:8pt;color:#555;}',
+'.main{display:flex;gap:6mm;}',
+'.col{flex:1;}',
+'.box{border:1px solid #ccc;border-radius:2mm;padding:3.5mm 4.5mm;margin-bottom:3.5mm;}',
+'.box h3{font-size:9pt;color:#CC0000;letter-spacing:.5px;text-transform:uppercase;margin-bottom:2mm;border-bottom:1px dashed #ddd;padding-bottom:1.5mm;}',
+'.a5-f{display:flex;font-size:9pt;margin-bottom:1.3mm;line-height:1.4;}',
+'.a5-l{width:26mm;flex-shrink:0;color:#888;}',
+'.a5-v{font-weight:600;flex:1;word-break:break-word;}',
+'.shipdet{display:flex;gap:4mm;margin-bottom:3.5mm;}',
+'.shipdet .box{flex:1;margin-bottom:0;}',
+'.decl{font-size:7pt;color:#555;line-height:1.5;border-top:1px dashed #ccc;padding-top:2.5mm;margin-top:1mm;}',
+'.sign{display:flex;justify-content:space-between;margin-top:6mm;}',
+'.sign div{width:55mm;text-align:center;font-size:8pt;color:#555;border-top:1px solid #999;padding-top:1.5mm;}',
+'.wm{position:absolute;bottom:8mm;right:10mm;font-size:7.5pt;color:#aaa;}',
+'</style></head><body>',
+'<div class="sheet">',
+
+'<div class="hdr"><div><h1>SK LOGISTICS</h1><div class="tag">INTERNATIONAL COURIER &amp; CARGO DIVISION</div>',
+'<div class="addr">Bahadurpura, Hyderabad \u2013 500064, Telangana, India<br>\u260E 8919855159 | 8886507472</div></div>',
+'<div class="refbox"><div class="lbl">AWB / Reference No.</div><div class="val">' + esc(r.awb) + '</div>',
+'<div class="dt">' + fmtDT(new Date(r.dateTime)) + '</div></div></div>',
+
+'<div class="shipdet">',
+'<div class="box">' + a5Row('Courier', esc(r.courier)) + a5Row('Mode', esc(r.mode)) + a5Row('Payment', esc(r.payment)) + '</div>',
+'<div class="box">' + a5Row('Weight', esc(r.weight) + ' kg') + a5Row('Pieces', esc(r.pieces)) + a5Row('Contents', esc(r.contents)) + '</div>',
+'<div class="box">' + a5Row('Charges', '\u20B9 ' + esc(r.charges||'0')) + (hasRem ? a5Row('Remarks', esc(r.remarks)) : '') + '</div>',
+'</div>',
+
+'<div class="main">',
+'<div class="col"><div class="box"><h3>Shipper / Origin</h3>',
+a5Row('Address', esc(r.originAddr)),
+a5Row('City', esc(r.originCity)),
+a5Row('State', esc(r.originState)),
+a5Row('Postal Code', esc(r.originPostal)),
+a5Row('Country', esc(r.originCountry)),
+a5Row('Sender', esc(r.senderName)),
+a5Row('Phone', esc(r.senderPhone)),
+a5Row('Email', esc(r.senderEmail)),
+'</div></div>',
+
+'<div class="col"><div class="box"><h3>Consignee / Destination</h3>',
+a5Row('Address', esc(r.destAddr)),
+a5Row('City', esc(r.destCity)),
+a5Row('State', esc(r.destState)),
+a5Row('Postal Code', esc(r.destPostal)),
+a5Row('Country', '<b>' + esc(r.destCountry) + '</b>'),
+a5Row('Receiver', esc(r.receiverName)),
+a5Row('Phone', esc(r.receiverPhone)),
+a5Row('Email', esc(r.receiverEmail)),
+'</div></div>',
+'</div>',
+
+'<div class="decl">Consignor declares: No gold, silver, cash, jewellery, currency or prohibited/dangerous goods in this shipment. SK Logistics is a SERVICE PROVIDER / carrier agent only. Consignor is liable for customs duties, taxes &amp; accuracy of contents/value declared for international clearance. Max liability: Documents \u20B91,500 | Non-Documents \u20B92,500 (owner risk). For higher coverage, opt for Carrier Risk at time of booking.</div>',
+
+'<div class="sign"><div>Consignor / Sender Signature</div><div>Authorized Signatory \u2013 SK Logistics</div></div>',
+'<div class="wm">Generated ' + fmtDT(new Date()) + ' \u00B7 SK Logistics, Bahadurpura</div>',
+'</div>',
+'<script>window.onload=function(){setTimeout(function(){window.print();},200);};<\/script>',
+'</body></html>'
+  ].join("");
+
+  var win = window.open("", "_blank", "width=900,height=650");
   if (!win) { toast("Allow popups for printing"); return; }
   win.document.open();
   win.document.write(html);
@@ -861,7 +867,6 @@ function openShare() {
   rc.innerHTML = "";
   var c = makeReceiptCanvas(SAVED, false); c.style.maxWidth = "100%";
   rc.appendChild(c); SHARE_CANVAS = c;
-  var wl = document.getElementById("wa-manual-link"); if (wl) wl.innerHTML = "";
   var tp = document.getElementById("txt-phone"); if (tp) tp.value = SAVED.receiverPhone || "";
   var tm = document.getElementById("txt-msg"); if (tm) tm.value = buildReceiverText(SAVED);
   setShareTab("img");
@@ -906,11 +911,8 @@ function fallbackWA(c) {
   a.href = c.toDataURL("image/png");
   a.download = "SKL_Receipt_" + (SAVED.awb||"receipt") + ".png";
   a.click();
-  toast("✅ Image saved! Tap 'Open WhatsApp' below, then attach it from your gallery.", 5000);
-  var link = document.getElementById("wa-manual-link");
-  if (link) {
-    link.innerHTML = '<a class="btn b-wa" href="https://wa.me/" target="_blank" rel="noopener" style="display:flex;text-decoration:none;margin-top:8px;">📱 Open WhatsApp →</a>';
-  }
+  toast("✅ Image saved! Opening WhatsApp — attach the saved image from your gallery.", 4500);
+  setTimeout(function(){ window.open("https://wa.me/", "_blank"); }, 700);
   var btn = document.getElementById("wabtn"); if (btn) btn.textContent = "📤 Share to WhatsApp";
 }
 function doShare() {
@@ -1210,30 +1212,10 @@ function histRows(list) {
     '<div><span style="color:#888;">Via:</span> <b>' + esc(r.courier) + '</b></div>' +
     '<div><span style="color:#888;">Receiver:</span> ' + esc(r.receiverName||"—") + '</div>' +
     '<div><span style="color:#888;">Pay:</span> ' + esc(r.payment) + '</div></div>' +
-    '<div style="display:flex;gap:8px;">' +
-    '<button class="btn b-gray" style="padding:11px;font-size:13px;flex:1;" onclick="editHistItem(' + r.id + ')">✏️ Edit</button>' +
-    '<button class="btn b-red" style="padding:11px;font-size:13px;flex:1;" onclick="reprnt(' + r.id + ')">📄 View &amp; Share</button>' +
-    '</div></div>';
+    '<button class="btn b-red" style="padding:11px;font-size:14px;" onclick="reprnt(' + JSON.stringify(r) + ')">📄 View &amp; Share</button></div>';
   }).join("");
 }
-function findHistById(id) {
-  for (var i = 0; i < HIST.length; i++) { if (HIST[i].id === id) return HIST[i]; }
-  return null;
-}
-function reprnt(id) {
-  var r = findHistById(id); if (!r) { toast("Record not found"); return; }
-  EDITING_ID = null; SAVED = r; goPage("booking");
-  setTimeout(function(){ window.scrollTo({top:document.body.scrollHeight,behavior:"smooth"}); }, 300);
-}
-function editHistItem(id) {
-  var r = findHistById(id); if (!r) { toast("Record not found"); return; }
-  F = Object.assign({}, r);
-  EDITING_ID = id;
-  SAVED = null;
-  goPage("booking");
-  toast("✏️ Editing " + r.awb + " — change details, then Save", 3500);
-}
-function cancelEdit() { EDITING_ID = null; freshForm(); renderBooking(); }
+function reprnt(r) { SAVED = r; goPage("booking"); setTimeout(function(){ window.scrollTo({top:document.body.scrollHeight,behavior:"smooth"}); }, 300); }
 
 // ═══════════════════════ SUMMARY PAGE ════════════════════════════════════
 function todayStr() { return fmtD(new Date()).replace(/ /g,"_"); }
