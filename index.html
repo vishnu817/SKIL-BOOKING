@@ -266,7 +266,7 @@ function pad2(n) { n = String(n); return n.length < 2 ? "0" + n : n; }
 function fmtRefDate(d) {
   return pad2(d.getMonth()+1) + pad2(d.getDate()) + String(d.getFullYear()).slice(-2);
 }
-// Next sequence number for today's auto-generated reference numbers (SKL-MMDDYY-NN)
+// Next sequence number for today's auto-generated reference numbers (SKLMMDDYYNN)
 function nextSeqForToday() {
   var prefix = "SKL-" + fmtRefDate(new Date()) + "-";
   var max = 0;
