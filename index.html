@@ -266,7 +266,7 @@ function pad2(n) { n = String(n); return n.length < 2 ? "0" + n : n; }
 function fmtRefDate(d) {
   return pad2(d.getMonth()+1) + pad2(d.getDate()) + String(d.getFullYear()).slice(-2);
 }
-// Next sequence number for today's auto-generated reference numbers (SKLMMDDYYNN)
+// Next sequence number for today's auto-generated reference numbers (SKL-MMDDYY-NN)
 function nextSeqForToday() {
   var prefix = "SKL-" + fmtRefDate(new Date()) + "-";
   var max = 0;
@@ -376,7 +376,7 @@ function makeReceiptCanvas(r, forPrint) {
   ctx.fillStyle=C.red; ctx.fillRect(0,0,W,4);
   // Logo
   ctx.textAlign='center';
-  if (LOGO_READY) {
+  if (LOGO_READY && !forPrint) {
     var lh = 34, lw = lh * LOGO_ASPECT;
     var lx = W/2 - lw/2, ly = 10;
     ctx.save();
