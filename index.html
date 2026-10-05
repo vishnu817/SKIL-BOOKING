@@ -735,6 +735,7 @@ function bookingHTML() {
   h += '<button class="scan-btn" onclick="openScan()" title="Scan barcode">';
   h += '<svg viewBox="0 0 24 24"><path d="M2 4h2v16H2zm3 0h1v16H5zm2 0h2v16H7zm3 0h1v16h-1zm2 0h2v16h-2zm3 0h1v16h-1zm2 0h2v16h-2zM1 2v2h22V2zm0 18v2h22v-2z"/></svg>';
   h += '</button></div>';
+  h += '<button class="btn b-gray" id="atl-btn" style="margin-top:8px;padding:10px;font-size:13px;" onclick="fetchFromAtlantic()">⬇ Fetch details from Atlantic (SELF)</button>';
   h += '<div style="font-size:11px;color:#aaa;margin-top:4px;">If left blank, a reference number like <b>SKL-' + fmtRefDate(new Date()) + '-' + pad2(nextSeqForToday()) + '</b> will be generated on save.</div>';
   h += '</div>';
 
@@ -1264,7 +1265,67 @@ function onBarcode(text) {
   var fl = document.getElementById("scan-flash");
   fl.style.opacity = "0.5"; setTimeout(function(){ fl.style.opacity = "0"; }, 300);
   F.awb = text;
-  setTimeout(function(){ closeScan(); toast("✅ AWB: " + text, 3000); renderBooking(); }, 500);
+  setTimeout(function(){ closeScan(); toast("✅ AWB: " + text, 3000); renderBooking(); if (F.courier === "SELF") fetchFromAtlantic(true); }, 500);
+}
+
+// ═══════════════ ATLANTIC AUTO-FILL ═══════════════════════════════════════════
+var COUNTRY_ALIASES = {"U.S.A.":"United States","USA":"United States","US":"United States","U.S.":"United States",
+  "UNITED STATES OF AMERICA":"United States","U.A.E.":"United Arab Emirates","UAE":"United Arab Emirates",
+  "U.K.":"United Kingdom","UK":"United Kingdom","GREAT BRITAIN":"United Kingdom","ENGLAND":"United Kingdom",
+  "KSA":"Saudi Arabia","S. KOREA":"South Korea","KOREA":"South Korea"};
+
+function atlanticJsonp(params, timeoutMs) {
+  return new Promise(function(resolve, reject) {
+    var cb = "sklatl_" + Math.random().toString(36).slice(2);
+    var s = document.createElement("script");
+    var done = false;
+    function cleanup() { done = true; delete window[cb]; s.remove(); }
+    window[cb] = function(d) { clearTimeout(t); cleanup(); resolve(d); };
+    s.onerror = function() { clearTimeout(t); cleanup(); reject(new Error("network")); };
+    var t = setTimeout(function() { if (!done) { cleanup(); reject(new Error("timeout")); } }, timeoutMs || 15000);
+    params.callback = cb;
+    s.src = TRACKING_APPS_SCRIPT_URL + "?" + new URLSearchParams(params).toString();
+    document.body.appendChild(s);
+  });
+}
+
+function fetchFromAtlantic(auto) {
+  var awb = (F.awb || "").trim();
+  if (!awb) { toast("⚠️ Enter or scan the AWB first"); return; }
+  var btn = document.getElementById("atl-btn");
+  if (btn) { btn.disabled = true; btn.textContent = "Fetching from Atlantic…"; }
+  atlanticJsonp({ action: "atlanticBooking", awb: awb }).then(function(res) {
+    if (!res || !res.ok) {
+      toast(res && res.error === "AWB_NOT_FOUND" ? "ℹ️ Atlantic has no booking for this AWB yet" : "⚠️ Atlantic lookup failed: " + (res && res.error || "unknown"), 4000);
+      renderBooking(); return;
+    }
+    var b = res.booking, filled = {};
+    function tc(s) { return titleCase(String(s || "").toLowerCase()); }
+    // Country → match against dropdown, add if missing
+    var rawC = String(b.destCountry || "").trim();
+    var cName = COUNTRY_ALIASES[rawC.toUpperCase()] || tc(rawC);
+    if (cName) {
+      var hit = COUNTRIES.filter(function(c){ return c.toLowerCase() === cName.toLowerCase(); })[0];
+      if (!hit) { COUNTRIES.splice(COUNTRIES.length - 1, 0, cName); hit = cName; }
+      F.destCountry = hit; filled.destCountry = true;
+    }
+    // Destination city (Atlantic sometimes puts only the country here)
+    var dCity = String(b.destination || "").trim();
+    if (dCity && !COUNTRY_ALIASES[dCity.toUpperCase()] && dCity.toLowerCase() !== (F.destCountry || "").toLowerCase()) {
+      F.destCity = tc(dCity.split(",")[0]); filled.destCity = true;
+    }
+    if (b.consignee) { F.receiverName = String(b.consignee).toUpperCase(); filled.receiverName = true; }
+    if (b.shipper && !F.senderName) { F.senderName = tc(b.shipper); }
+    if (b.weight && parseFloat(b.weight) > 0) { F.weight = String(parseFloat(b.weight)); }
+    if (b.origin && !/^hyderabad$/i.test(b.origin) && !F.originCity) { F.originCity = tc(b.origin); }
+    F.courier = "SELF";
+    AF = Object.assign({}, AF, filled);
+    toast("✅ Filled from Atlantic — add address, phone & charges", 4000);
+    renderBooking();
+  }).catch(function(err) {
+    toast("⚠️ Couldn't reach Atlantic lookup (" + err.message + ")", 4000);
+    renderBooking();
+  });
 }
 
 // OCR camera stream (separate from Quagga)
