@@ -316,7 +316,7 @@ var COUNTRIES = ["United States","United Kingdom","United Arab Emirates","Saudi 
 
 // ═══════════════════════ STATE ════════════════════════════════════════════
 function blankForm() {
-  return {awb:"",courier:"FedEx",mode:"Air Freight",
+  return {awb:"",dateTime:"",courier:"FedEx",mode:"Air Freight",
     originAddr:"",originCity:"Hyderabad",originState:"Telangana",originPostal:"500064",originCountry:"India",
     destAddr:"",destCity:"",destState:"",destPostal:"",destCountry:"",
     senderName:"",senderPhone:"",senderEmail:"",receiverName:"",receiverPhone:"",receiverEmail:"",
@@ -339,6 +339,21 @@ try { HIST = JSON.parse(localStorage.getItem("sklIntl1") || "[]"); } catch(e) {}
 
 function saveHist() { try { localStorage.setItem("sklIntl1", JSON.stringify(HIST)); } catch(e) {} }
 function freshForm() { F = blankForm(); AF = {}; }
+
+// Date/time helpers for the editable booking date
+function toLocalInput(iso) {
+  var d = new Date(iso); if (isNaN(d.getTime())) d = new Date();
+  function p(n){ return (n < 10 ? "0" : "") + n; }
+  return d.getFullYear() + "-" + p(d.getMonth()+1) + "-" + p(d.getDate()) + "T" + p(d.getHours()) + ":" + p(d.getMinutes());
+}
+function setBookingDT(v) {
+  if (!v) { F.dateTime = ""; renderBooking(); return; }   // "Now" → auto
+  var d = new Date(v);
+  if (isNaN(d.getTime())) return;
+  F.dateTime = d.toISOString();
+  var hint = document.getElementById("dt-hint");
+  if (hint) hint.innerHTML = "✏️ Custom date &amp; time set";
+}
 
 // ═══════════════════════ UTILS ════════════════════════════════════════════
 function fmtDT(d) {
@@ -693,11 +708,6 @@ function renderBooking() {
   el.innerHTML = bookingHTML();
   setTimeout(function(){
     // live clock
-    var fdt = document.getElementById("fdt");
-    if (fdt) {
-      fdt.textContent = fmtDT(new Date());
-      setInterval(function(){ if(fdt) fdt.textContent = fmtDT(new Date()); }, 1000);
-    }
     // saved receipt canvas
     if (SAVED) {
       var wrap = document.getElementById("rcv-wrap");
@@ -724,7 +734,11 @@ function bookingHTML() {
   h += '<div class="card">';
   h += '<div class="ctitle">📋 Booking Details</div>';
   h += '<div class="fd"><label class="lbl">Date &amp; Time</label>';
-  h += '<div id="fdt" style="padding:12px;background:#f5f5f5;border-radius:10px;color:#555;font-size:14px;">' + fmtDT(new Date()) + '</div></div>';
+  h += '<div style="display:flex;gap:8px;align-items:center;">';
+  h += '<input type="datetime-local" id="dt-inp" value="' + toLocalInput(F.dateTime || new Date().toISOString()) + '" ';
+  h += 'style="flex:1;font-weight:600;" onchange="setBookingDT(this.value)">';
+  h += '<button class="btn b-gray" style="width:auto;padding:10px 14px;font-size:12px;" onclick="setBookingDT(\'\')">Now</button></div>';
+  h += '<div id="dt-hint" style="font-size:11px;color:#aaa;margin-top:4px;">' + (F.dateTime ? '✏️ Custom date &amp; time set' : 'Auto — current time is used on save. Change it if booking was made earlier.') + '</div></div>';
 
   // AWB
   h += '<div class="fd"><label class="lbl">AWB / Tracking Number</label>';
@@ -875,14 +889,14 @@ function doSave() {
   if (EDITING_ID) {
     // Update the existing entry in place instead of creating a duplicate
     var idx = HIST.findIndex(function(h){ return h.id === EDITING_ID; });
-    var r = Object.assign({}, F, { dateTime: (idx > -1 ? HIST[idx].dateTime : new Date().toISOString()), id: EDITING_ID });
+    var r = Object.assign({}, F, { dateTime: (F.dateTime || (idx > -1 ? HIST[idx].dateTime : new Date().toISOString())), id: EDITING_ID });
     if (idx > -1) { HIST[idx] = r; } else { HIST.unshift(r); }
     SAVED = r; AF = {}; EDITING_ID = null;
     saveHist(); renderBooking(); updBadge();
     pushToTrackingSheet(r);
     toast("✅ Booking updated!");
   } else {
-    var r = Object.assign({}, F, { dateTime: new Date().toISOString(), id: Date.now() });
+    var r = Object.assign({}, F, { dateTime: (F.dateTime || new Date().toISOString()), id: Date.now() });
     HIST.unshift(r); SAVED = r; AF = {};
     saveHist(); renderBooking(); updBadge();
     pushToTrackingSheet(r);
